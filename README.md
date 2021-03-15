@@ -45,7 +45,7 @@ For algorithm details, please check out [OpenAI Spinning Up](https://spinningup.
    + Actor Network,
    + Critic Network,
 + **elegantrl/agent.py**  # RL algorithms. 
-+ **elegantrl/run.py**    # run DEMO 1 ~ 4 in run__demo().
++ **elegantrl/run.py**    # run DEMO 1 ~ 4
    + Parameter initialization,
    + Training loop,
    + Evaluator.
@@ -54,7 +54,9 @@ For algorithm details, please check out [OpenAI Spinning Up](https://spinningup.
 + **elegantrl/env.py**    # gym env or custom env, including FinanceMultiStockEnv.
    + A PreprocessEnv class for gym-environment modification.
    + A self-created stock trading environment as an example for user customization.
-+ BipedalWalker_Example.ipynb      # BipedalWalker-v2 in jupyter notebooks
++ **BipedalWalker_Example.ipynb**      # BipedalWalker-v2 in jupyter notebooks
++ **ElegantRL_examples.ipynb**       # Demo 1~ 4 in jupyter notebooks. Tell you how to use tutorial version and advanced version.
++ **ElegantRL_single_file_train_ppo.py**  # Use single file to train PPO, more simple than tutorial version
 
 As a high-level overview, the relations among the files are as follows. Initialize an environment in **Env.py** and an agent in **Agent.py**. The agent is constructed with Actor and Critic networks in **Net.py**. In each training step in **Run.py**, the agent interacts with the environment, generating transitions that are stored into a Replay Buffer. Then, the agent fetches transitions from the Replay Buffer to train its networks. After each update, an evaluator evaluates the agent's performance and saves the agent if the performance is good.
 
@@ -94,12 +96,14 @@ Check out a video on bilibili: [Crack the BipedalWalkerHardcore-v2 with total re
 # Requirements
 
     Necessary:
-    | Python 3.7           
-    | PyTorch 1.0.2       
+    | Python 3.6+     | For multiprocessing Python build-in library.          
+    | PyTorch 1.6+    | pip3 install torch   
 
     Not necessary:
-    | Numpy 1.19.0    | For ReplayBuffer. Numpy will be install when installing PyTorch
-    | gym 0.17.2      | For RL training env. Gym provide some tutorial env for DRL training.
-    | pubullet 2.7    | For RL training env. We use PyBullet(free) as an alternative of MuJoCo(not free).
+    | Numpy 1.18+     | For ReplayBuffer. Numpy will be installed along with PyTorch.
+    | gym 0.17.0      | For RL training env. Gym provides tutorial env for DRL training. (env.render() bug in gym==1.18 pyglet==1.6. Change to gym==1.17.0, pyglet==1.5)
+    | pybullet 2.7+   | For RL training env. We use PyBullet (free) as an alternative of MuJoCo (not free).
     | box2d-py 2.3.8  | For gym. Use pip install Box2D (instead of box2d-py)
     | matplotlib 3.2  | For plots. Evaluate the agent performance.
+    
+    pip3 install gym==1.17.0 pybullet Box2D matplotlib

@@ -9,18 +9,6 @@ from elegantrl.net import Actor, ActorSAC, ActorPPO
 from elegantrl.net import Critic, CriticAdv, CriticTwin
 from elegantrl.net import InterDPG, InterSPG, InterPPO
 
-"""update log
-2021-03-01 update_policy() --> update_net(), max_step and target_step
-2021-03-02 
-DQN self.act --> self.cri, self.cri = QNet(), self.act = self.cri
-update_policy() --> update_net()
-update_buffer() --> store_transition()
-extend_memo() --> extend_buffer()
-append_memo() --> append_buffer()
-log_prob --> logprob, __ --> _  # don't use double underline
-class agent_rl --> instance agent_rl(...)
-"""
-
 """ElegantRL (Pytorch 3 files model-free DRL Library)
 GitHub.com: YonV1943, Zhihu.com: 曾伊言
 
@@ -47,212 +35,40 @@ SAC https://github.com/TianhongDai/reinforcement-learning-algorithms/tree/master
 DUEL https://github.com/gouxiangchen/dueling-DQN-pytorch good
 """
 
-'''Value-based Methods (DQN variance)'''
-
-
-class AgentDQN:
-    def __init__(self):
-        super().__init__()
-        self.explore_rate = 0.1  # the probability of choosing action randomly in epsilon-greedy
-        self.action_dim = None  # chose discrete action randomly in epsilon-greedy
-
-        self.state = None  # set for self.update_buffer(), initialize before training
-        self.learning_rate = 1e-4
-        self.soft_update_tau = 2 ** -8  # 5e-3 ~= 2 ** -8
-
-        self.cri = self.cri_target = None
-        self.act = self.cri  # to keep the same from Actor-Critic framework
-        self.criterion = None
-        self.optimizer = None
-        self.device = None
-
-    def init(self, net_dim, state_dim, action_dim):  # explict call self.init() for multiprocessing
-        self.action_dim = action_dim
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        self.cri = QNet(net_dim, state_dim, action_dim).to(self.device)
-        self.cri_target = deepcopy(self.cri)
-        self.act = self.cri  # to keep the same from Actor-Critic framework
-
-        self.criterion = torch.torch.nn.MSELoss()
-        self.optimizer = torch.optim.Adam(self.cri.parameters(), lr=self.learning_rate)
-
-    def select_actions(self, states):  # for discrete action space
-        if rd.rand() < self.explore_rate:  # epsilon-greedy
-            a_int = rd.randint(self.action_dim, size=(len(states),))  # choosing action randomly
-        else:
-            states = torch.as_tensor(states, dtype=torch.float32, device=self.device)
-            actions = self.act(states)
-            a_int = actions.argmax(dim=1).detach().cpu().numpy()
-        return a_int
-
-    def store_transition(self, env, buffer, target_step, reward_scale, gamma):
-        for _ in range(target_step):
-            action = self.select_actions((self.state,))[0]
-            next_s, reward, done, _ = env.step(action)
-
-            other = (reward * reward_scale, 0.0 if done else gamma, action)  # action is an int
-            buffer.append_buffer(self.state, other)
-            self.state = env.reset() if done else next_s
-        return target_step
-
-    def update_net(self, buffer, max_step, batch_size, repeat_times):
-        """Contribution of DQN (Deep Q Network)
-        1. Q-table (discrete state space) --> Q-network (continuous state space)
-        2. Use experiment replay buffer to train a neural network in RL
-        3. Use soft target update to stablize training in RL
-        """
-        buffer.update__now_len__before_sample()
-
-        next_q = obj_critic = None
-        for _ in range(int(max_step * repeat_times)):
-            with torch.no_grad():
-                reward, mask, action, state, next_s = buffer.sample_batch(batch_size)  # next_state
-                next_q = self.cri_target(next_s).max(dim=1, keepdim=True)[0]
-                q_label = reward + mask * next_q
-            q_eval = self.cri(state).gather(1, action.type(torch.long))
-            obj_critic = self.criterion(q_eval, q_label)
-
-            self.optimizer.zero_grad()
-            obj_critic.backward()
-            self.optimizer.step()
-            self.soft_update(self.cri_target, self.cri)
-        return next_q.mean().item(), obj_critic.item()
-
-    def save_load_model(self, cwd, if_save):
-        save_path = '{}/q_net.pth'.format(cwd)
-
-        if if_save:
-            torch.save(self.cri.state_dict(), save_path)
-        elif os.path.exists(save_path):  # if_load
-            network_dict = torch.load(save_path, map_location=lambda storage, loc: storage)
-            self.cri.load_state_dict(network_dict)
-            print("Loaded cri:", cwd)
-        else:
-            print("FileNotFound when load_model: {}".format(cwd))
-
-    def soft_update(self, target_net, current_net):
-        for tar, cur in zip(target_net.parameters(), current_net.parameters()):
-            tar.data.copy_(cur.data.__mul__(self.soft_update_tau) + tar.data.__mul__(1 - self.soft_update_tau))
-            # tar.data.copy_(cur.data * self.soft_update_tau + tar.data * (1 - self.soft_update_tau))
-
-
-class AgentDuelingDQN(AgentDQN):
-    def __init__(self):
-        super().__init__()
-        self.explore_rate = 0.25  # the probability of choosing action randomly in epsilon-greedy
-
-    def init(self, net_dim, state_dim, action_dim):
-        self.action_dim = action_dim
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        self.cri = QNetDuel(net_dim, state_dim, action_dim).to(self.device)
-        self.cri_target = deepcopy(self.cri)
-        self.act = self.cri
-
-        self.criterion = torch.nn.MSELoss()
-        self.optimizer = torch.optim.Adam(self.cri.parameters(), lr=self.learning_rate)
-        """Contribution of Dueling DQN
-        1. Advantage function (of A2C) --> Dueling Q value = val_q + adv_q - adv_q.mean()
-        """
-
-
-class AgentDoubleDQN(AgentDQN):
-    def __init__(self):
-        super().__init__()
-        self.explore_rate = 0.25  # the probability of choosing action randomly in epsilon-greedy
-        self.softmax = torch.nn.Softmax(dim=1)
-
-    def init(self, net_dim, state_dim, action_dim):
-        self.action_dim = action_dim
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        self.cri = QNetTwin(net_dim, state_dim, action_dim).to(self.device)
-        self.cri_target = deepcopy(self.cri)
-        self.act = self.cri
-
-        self.criterion = torch.nn.SmoothL1Loss()
-        self.optimizer = torch.optim.Adam(self.act.parameters(), lr=self.learning_rate)
-
-    def select_actions(self, states):  # for discrete action space
-        states = torch.as_tensor(states, dtype=torch.float32, device=self.device)
-        actions = self.act(states)
-        if rd.rand() < self.explore_rate:  # epsilon-greedy
-            a_prob_list = self.softmax(actions).detach().cpu().numpy()  # choose action according to Q value
-            a_int = [rd.choice(self.action_dim, p=a_prob) for a_prob in a_prob_list]
-        else:
-            a_int = actions.argmax(dim=1).detach().cpu().numpy()
-        return a_int
-
-    def update_net(self, buffer, max_step, batch_size, repeat_times):
-        """Contribution of DDQN (Double DQN)
-        1. Twin Q-Network. Use min(q1, q2) to reduce over-estimation.
-        """
-        buffer.update__now_len__before_sample()
-
-        next_q = obj_critic = None
-        for _ in range(int(max_step * repeat_times)):
-            with torch.no_grad():
-                reward, mask, action, state, next_s = buffer.sample_batch(batch_size)
-                next_q = self.cri_target(next_s).max(dim=1, keepdim=True)[0]
-                q_label = reward + mask * next_q
-            act_int = action.type(torch.long)
-            q1, q2 = [qs.gather(1, act_int) for qs in self.act.get_q1_q2(state)]
-            obj_critic = self.criterion(q1, q_label) + self.criterion(q2, q_label)
-
-            self.optimizer.zero_grad()
-            obj_critic.backward()
-            self.optimizer.step()
-            self.soft_update(self.cri_target, self.cri)
-        return next_q.mean().item(), obj_critic.item() / 2
-
-
-class AgentD3QN(AgentDoubleDQN):  # D3QN: Dueling Double DQN
-    def __init__(self):
-        super().__init__()
-
-    def init(self, net_dim, state_dim, action_dim):
-        self.action_dim = action_dim
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        self.cri = QNetTwinDuel(net_dim, state_dim, action_dim).to(self.device)
-        self.cri_target = deepcopy(self.cri)
-        self.act = self.cri
-
-        self.criterion = torch.nn.SmoothL1Loss()
-        self.optimizer = torch.optim.Adam(self.act.parameters(), lr=self.learning_rate)
-        """Contribution of D3QN (Dueling Double DQN)
-        There are not contribution of D3QN.  
-        Obviously, DoubleDQN is compatible with DuelingDQN.
-        Any beginner can come up with this idea (D3QN) independently.
-        """
-
-
-'''Actor-Critic Methods (Policy Gradient)'''
-
 
 class AgentBase:
     def __init__(self):
-        self.state = None  # set for self.update_buffer(), initialize before training
         self.learning_rate = 1e-4
         self.soft_update_tau = 2 ** -8  # 5e-3 ~= 2 ** -8
+        self.state = None  # set for self.update_buffer(), initialize before training
+        self.device = None
 
         self.act = self.act_target = None
         self.cri = self.cri_target = None
         self.criterion = None
         self.act_optimizer = None
         self.cri_optimizer = None
-        self.device = None
 
     def init(self, net_dim, state_dim, action_dim):  # explict call self.init() for multiprocessing
-        pass
+        pass  # replace by different DRL algorithms
+
+    def select_action(self, state):
+        states = torch.as_tensor((state,), dtype=torch.float32, device=self.device).detach_()
+        action = self.act(states)[0]
+        return action.cpu().numpy()  # -1 < action < +1
 
     def select_actions(self, states):  # states = (state, ...)
-        return (None,)  # -1 < action < +1
+        """Select actions for exploration
+
+        :param states: (state, ) or (state, state, ...) or state.shape==(n, *state_dim)
+        """
+        states = torch.as_tensor(states, dtype=torch.float32, device=self.device).detach_()
+        actions = self.act(states)[0]
+        return actions.cpu().numpy()  # -1 < action < +1
 
     def store_transition(self, env, buffer, target_step, reward_scale, gamma):
         for _ in range(target_step):
-            action = self.select_actions((self.state,))[0]
+            action = self.select_action(self.state)
             next_s, reward, done, _ = env.step(action)
             other = (reward * reward_scale, 0.0 if done else gamma, *action)
             buffer.append_buffer(self.state, other)
@@ -287,6 +103,186 @@ class AgentBase:
             # tar.data.copy_(cur.data * self.soft_update_tau + tar.data * (1 - self.soft_update_tau))
 
 
+'''Value-based Methods (DQN variance)'''
+
+
+class AgentDQN(AgentBase):
+    def __init__(self):
+        super().__init__()
+        self.explore_rate = 0.1  # the probability of choosing action randomly in epsilon-greedy
+        self.action_dim = None  # chose discrete action randomly in epsilon-greedy
+
+    def init(self, net_dim, state_dim, action_dim):
+        """explict call self.init() for multiprocessing
+
+        :param net_dim: the dimension of networks (the width of neural networks)
+        :param state_dim: the dimension of state (the number of state vector)
+        :param action_dim: the dimension of action (the number of discrete action)
+        """
+        self.action_dim = action_dim
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self.cri = QNet(net_dim, state_dim, action_dim).to(self.device)
+        self.cri_target = deepcopy(self.cri)
+        self.act = self.cri  # to keep the same from Actor-Critic framework
+
+        self.criterion = torch.torch.nn.MSELoss()
+        self.cri_optimizer = torch.optim.Adam(self.cri.parameters(), lr=self.learning_rate)
+
+    def select_action(self, state):  # for discrete action space
+        """Select actions for exploration
+
+        :param state: (state, ) or (state, state, ...) or state.shape==(n, *state_dim)
+        """
+        if rd.rand() < self.explore_rate:  # epsilon-greedy
+            a_int = rd.randint(self.action_dim)  # choosing action randomly
+        else:
+            states = torch.as_tensor((state,), dtype=torch.float32, device=self.device).detach_()
+            action = self.act(states)[0]
+            a_int = action.argmax(dim=0).cpu().numpy()
+        return a_int
+
+    def store_transition(self, env, buffer, target_step, reward_scale, gamma):
+        """actor explores in env, then stores the env transition to ReplayBuffer
+
+        :param env: RL training environment. env.reset() env.step()
+        :param buffer: Experience Replay Buffer. buffer.append_buffer() buffer.extend_buffer()
+        :param target_step: explore target_step number of step in env
+        :param reward_scale: scale reward, 'reward * reward_scale'
+        :param gamma: discount factor, 'mask = 0.0 if done else gamma'
+        """
+        for _ in range(target_step):
+            action = self.select_action(self.state)
+            next_s, reward, done, _ = env.step(action)
+
+            other = (reward * reward_scale, 0.0 if done else gamma, action)  # action is an int
+            buffer.append_buffer(self.state, other)
+            self.state = env.reset() if done else next_s
+        return target_step
+
+    def update_net(self, buffer, target_step, batch_size, repeat_times):
+        """update the neural network by sampling batch data from ReplayBuffer
+
+        :param buffer: Experience replay buffer. buffer.append_buffer() buffer.extend_buffer()
+        :param target_step: explore target_step number of step in env
+        :param batch_size: sample batch_size of data for Stochastic Gradient Descent
+        :param repeat_times: the times of sample batch = int(target_step * repeat_times) in off-policy
+        """
+        buffer.update_now_len_before_sample()
+
+        next_q = obj_critic = None
+        for _ in range(int(target_step * repeat_times)):
+            with torch.no_grad():
+                reward, mask, action, state, next_s = buffer.sample_batch(batch_size)  # next_state
+                next_q = self.cri_target(next_s).max(dim=1, keepdim=True)[0]
+                q_label = reward + mask * next_q
+            q_eval = self.cri(state).gather(1, action.type(torch.long))
+            obj_critic = self.criterion(q_eval, q_label)
+
+            self.cri_optimizer.zero_grad()
+            obj_critic.backward()
+            self.cri_optimizer.step()
+            self.soft_update(self.cri_target, self.cri)
+        return next_q.mean().item(), obj_critic.item()
+
+
+class AgentDuelingDQN(AgentDQN):
+    def __init__(self):
+        super().__init__()
+        self.explore_rate = 0.25  # the probability of choosing action randomly in epsilon-greedy
+
+    def init(self, net_dim, state_dim, action_dim):
+        self.action_dim = action_dim
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self.cri = QNetDuel(net_dim, state_dim, action_dim).to(self.device)
+        self.cri_target = deepcopy(self.cri)
+        self.act = self.cri
+
+        self.criterion = torch.nn.MSELoss()
+        self.cri_optimizer = torch.optim.Adam(self.cri.parameters(), lr=self.learning_rate)
+        """Contribution of Dueling DQN
+        1. Advantage function (of A2C) --> Dueling Q value = val_q + adv_q - adv_q.mean()
+        """
+
+
+class AgentDoubleDQN(AgentDQN):
+    def __init__(self):
+        super().__init__()
+        self.explore_rate = 0.25  # the probability of choosing action randomly in epsilon-greedy
+        self.softmax = torch.nn.Softmax(dim=1)
+
+    def init(self, net_dim, state_dim, action_dim):
+        self.action_dim = action_dim
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self.cri = QNetTwin(net_dim, state_dim, action_dim).to(self.device)
+        self.cri_target = deepcopy(self.cri)
+        self.act = self.cri
+
+        self.criterion = torch.nn.SmoothL1Loss()
+        self.cri_optimizer = torch.optim.Adam(self.act.parameters(), lr=self.learning_rate)
+
+    def select_action(self, state):  # for discrete action space
+        states = torch.as_tensor((state,), dtype=torch.float32, device=self.device).detach_()
+        actions = self.act(states)
+        if rd.rand() < self.explore_rate:  # epsilon-greedy
+            action = self.softmax(actions)[0]
+            a_prob = action.detach().cpu().numpy()  # choose action according to Q value
+            a_int = rd.choice(self.action_dim, p=a_prob)
+        else:
+            action = actions[0]
+            a_int = action.argmax(dim=0).cpu().numpy()
+        return a_int
+
+    def update_net(self, buffer, target_step, batch_size, repeat_times):
+        """Contribution of DDQN (Double DQN)
+        1. Twin Q-Network. Use min(q1, q2) to reduce over-estimation.
+        """
+        buffer.update_now_len_before_sample()
+
+        next_q = obj_critic = None
+        for _ in range(int(target_step * repeat_times)):
+            with torch.no_grad():
+                reward, mask, action, state, next_s = buffer.sample_batch(batch_size)
+                next_q = torch.min(*self.cri_target.get_q1_q2(next_s))
+                next_q = next_q.max(dim=1, keepdim=True)[0]
+                q_label = reward + mask * next_q
+            act_int = action.type(torch.long)
+            q1, q2 = [qs.gather(1, act_int) for qs in self.act.get_q1_q2(state)]
+            obj_critic = self.criterion(q1, q_label) + self.criterion(q2, q_label)
+
+            self.cri_optimizer.zero_grad()
+            obj_critic.backward()
+            self.cri_optimizer.step()
+            self.soft_update(self.cri_target, self.cri)
+        return next_q.mean().item(), obj_critic.item() / 2
+
+
+class AgentD3QN(AgentDoubleDQN):  # D3QN: Dueling Double DQN
+    def __init__(self):
+        super().__init__()
+
+    def init(self, net_dim, state_dim, action_dim):
+        self.action_dim = action_dim
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self.cri = QNetTwinDuel(net_dim, state_dim, action_dim).to(self.device)
+        self.cri_target = deepcopy(self.cri)
+        self.act = self.cri
+
+        self.criterion = torch.nn.SmoothL1Loss()
+        self.cri_optimizer = torch.optim.Adam(self.act.parameters(), lr=self.learning_rate)
+        """Contribution of D3QN (Dueling Double DQN)
+        There are not contribution of D3QN.  
+        Obviously, DoubleDQN is compatible with DuelingDQN.
+        Any beginner can come up with this idea (D3QN) independently.
+        """
+
+
+'''Actor-Critic Methods (Policy Gradient)'''
+
+
 class AgentDDPG(AgentBase):
     def __init__(self):
         super().__init__()
@@ -307,17 +303,16 @@ class AgentDDPG(AgentBase):
         self.act_optimizer = torch.optim.Adam(self.act.parameters(), lr=self.learning_rate)
         self.cri_optimizer = torch.optim.Adam(self.cri.parameters(), lr=self.learning_rate)
 
-    def select_actions(self, states):  # states = (state, ...)
-        states = torch.as_tensor(states, dtype=torch.float32, device=self.device)
-        actions = self.act(states)
-        actions = actions.detach().cpu().numpy()
-        return (actions + self.ou_noise()).clip(-1, 1)
+    def select_action(self, state):  # states = (state, ...)
+        states = torch.as_tensor((state,), dtype=torch.float32, device=self.device).detach_()
+        action = self.act(states)[0].cpu().numpy()
+        return (action + self.ou_noise()).ratio_clip(-1, 1)
 
-    def update_net(self, buffer, max_step, batch_size, repeat_times):
-        buffer.update__now_len__before_sample()
+    def update_net(self, buffer, target_step, batch_size, repeat_times):
+        buffer.update_now_len_before_sample()
 
         obj_critic = obj_actor = None  # just for print return
-        for _ in range(int(max_step * repeat_times)):
+        for _ in range(int(target_step * repeat_times)):
             with torch.no_grad():
                 reward, mask, action, state, next_s = buffer.sample_batch(batch_size)
                 next_q = self.cri_target(next_s, self.act_target(next_s))
@@ -350,6 +345,8 @@ class AgentTD3(AgentBase):
     def init(self, net_dim, state_dim, action_dim):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+        self.act = Actor(net_dim, state_dim, action_dim).to(self.device)
+        self.act_target = deepcopy(self.act)
         self.cri = CriticTwin(net_dim, state_dim, action_dim).to(self.device)
         self.cri_target = deepcopy(self.cri)
 
@@ -357,22 +354,22 @@ class AgentTD3(AgentBase):
         self.act_optimizer = torch.optim.Adam(self.act.parameters(), lr=self.learning_rate)
         self.cri_optimizer = torch.optim.Adam(self.cri.parameters(), lr=self.learning_rate)
 
-    def select_actions(self, states):  # states = (state, ...)
-        states = torch.as_tensor(states, dtype=torch.float32, device=self.device)
-        actions = self.act(states)
-        actions = (actions + torch.randn_like(actions) * self.explore_noise).clamp(-1, 1)
-        return actions.detach().cpu().numpy()
+    def select_action(self, state):  # states = (state, ...)
+        states = torch.as_tensor((state,), dtype=torch.float32, device=self.device).detach_()
+        action = self.act(states)[0]
+        action = (action + torch.randn_like(action) * self.explore_noise).clamp(-1, 1)
+        return action.cpu().numpy()
 
-    def update_net(self, buffer, max_step, batch_size, repeat_times):
+    def update_net(self, buffer, target_step, batch_size, repeat_times):
         """Contribution of TD3 (Twin Delay DDPG)
         1. twin critics (DoubleDQN -> TwinCritic, good idea)
         2. policy noise ('Deterministic Policy Gradient + policy noise' looks like Stochastic PG)
         3. delay update (I think it is not very useful)
         """
-        buffer.update__now_len__before_sample()
+        buffer.update_now_len_before_sample()
 
         obj_critic = obj_actor = None
-        for i in range(int(max_step * repeat_times)):
+        for i in range(int(target_step * repeat_times)):
             '''objective of critic (loss function of critic)'''
             with torch.no_grad():
                 reward, mask, action, state, next_s = buffer.sample_batch(batch_size)
@@ -419,7 +416,7 @@ class AgentInterAC(AgentBase):  # use InterSAC instead of InterAC .Warning: sth.
         self.criterion = torch.nn.MSELoss()
         self.optimizer = torch.optim.Adam(self.act.parameters(), lr=self.learning_rate)
 
-    def update_net(self, buffer, max_step, batch_size, repeat_times):
+    def update_net(self, buffer, target_step, batch_size, repeat_times):
         """Contribution of InterAC (Integrated network for deterministic policy gradient)
         1. First try integrated network to share parameter between two **different input** network.
         1. First try Encoder-DenseNetLikeNet-Decoder network architecture.
@@ -432,13 +429,13 @@ class AgentInterAC(AgentBase):  # use InterSAC instead of InterAC .Warning: sth.
 
         -1. InterAC is a semi-finished algorithms. InterSAC is a finished algorithm.
         """
-        buffer.update__now_len__before_sample()
+        buffer.update_now_len_before_sample()
 
         actor_obj = None  # just for print return
 
         k = 1.0 + buffer.now_len / buffer.max_len
         batch_size_ = int(batch_size * k)
-        update_times = int(max_step * k)
+        update_times = int(target_step * k)
 
         for i in range(update_times * repeat_times):
             with torch.no_grad():
@@ -503,22 +500,22 @@ class AgentSAC(AgentBase):
         self.cri_optimizer = torch.optim.Adam(self.cri.parameters(), lr=self.learning_rate)
         self.alpha_optimizer = torch.optim.Adam((self.alpha_log,), self.learning_rate)
 
-    def select_actions(self, states):  # states = (state, ...)
-        states = torch.as_tensor(states, dtype=torch.float32, device=self.device)
-        actions = self.act.get_action(states)
-        return actions.detach().cpu().numpy()
+    def select_action(self, state):  # states = (state, ...)
+        states = torch.as_tensor((state,), dtype=torch.float32, device=self.device).detach_()
+        action = self.act.get_action(states)[0]
+        return action.cpu().numpy()
 
-    def update_net(self, buffer, max_step, batch_size, repeat_times):
+    def update_net(self, buffer, target_step, batch_size, repeat_times):
         """Contribution of SAC (Soft Actor-Critic with maximum entropy)
         1. maximum entropy (Soft Q-learning -> Soft Actor-Critic, good idea)
         2. auto alpha (automating entropy adjustment on temperature parameter alpha for maximum entropy)
         3. SAC use TD3's TwinCritics too
         """
-        buffer.update__now_len__before_sample()
+        buffer.update_now_len_before_sample()
 
         alpha = self.alpha_log.exp().detach()
         obj_critic = None
-        for _ in range(int(max_step * repeat_times)):
+        for _ in range(int(target_step * repeat_times)):
             '''objective of critic (loss function of critic)'''
             with torch.no_grad():
                 reward, mask, action, state, next_s = buffer.sample_batch(batch_size)
@@ -564,7 +561,6 @@ class AgentModSAC(AgentSAC):  # Modified SAC using reliable_lambda and TTUR (Two
                                       requires_grad=True, device=self.device)  # trainable parameter
 
         self.act = ActorSAC(net_dim, state_dim, action_dim, self.if_use_dn).to(self.device)
-        self.act_target = deepcopy(self.act)
         self.cri = CriticTwin(int(net_dim * 1.25), state_dim, action_dim, self.if_use_dn).to(self.device)
         self.cri_target = deepcopy(self.cri)
 
@@ -580,7 +576,7 @@ class AgentModSAC(AgentSAC):  # Modified SAC using reliable_lambda and TTUR (Two
         3. Auto-TTUR updates parameter in non-integer times.
         4. net_dim of critic is slightly larger than actor.
         """
-        buffer.update__now_len__before_sample()
+        buffer.update_now_len_before_sample()
 
         k = 1.0 + buffer.now_len / buffer.max_len
         batch_size_ = int(batch_size * k)
@@ -593,10 +589,9 @@ class AgentModSAC(AgentSAC):  # Modified SAC using reliable_lambda and TTUR (Two
             with torch.no_grad():
                 reward, mask, action, state, next_s = buffer.sample_batch(batch_size_)
 
-                next_a, next_logprob = self.act_target.get_action_logprob(next_s)
+                next_a, next_logprob = self.act.get_action_logprob(next_s)
                 next_q = torch.min(*self.cri_target.get_q1_q2(next_s, next_a))
-                q_label = reward + mask * (next_q + next_logprob * alpha)  # don't write in this way
-                # q_label = reward + mask * next_q + next_logprob * alpha
+                q_label = reward + mask * (next_q + next_logprob * alpha)
             q1, q2 = self.cri.get_q1_q2(state, action)
             obj_critic = self.criterion(q1, q_label) + self.criterion(q2, q_label)
             self.obj_c = 0.995 * self.obj_c + 0.0025 * obj_critic.item()  # for reliable_lambda
@@ -626,12 +621,11 @@ class AgentModSAC(AgentSAC):  # Modified SAC using reliable_lambda and TTUR (Two
 
                 q_value_pg = torch.min(*self.cri_target.get_q1_q2(state, a_noise_pg))  # ceta3
                 obj_actor = -(q_value_pg + logprob * alpha.detach()).mean()
-                obj_actor = obj_actor * reliable_lambda
+                obj_actor = obj_actor * reliable_lambda  # max(0.01, reliable_lambda)
 
                 self.act_optimizer.zero_grad()
                 obj_actor.backward()
                 self.act_optimizer.step()
-                self.soft_update(self.act_target, self.act)
 
         return alpha.item(), self.obj_c
 
@@ -662,10 +656,10 @@ class AgentInterSAC(AgentSAC):  # Integrated Soft Actor-Critic
              {'params': self.act.dec_q2.parameters(), },
              {'params': (self.alpha_log,)}], lr=self.learning_rate)
 
-    def select_actions(self, states):
-        states = torch.as_tensor(states, dtype=torch.float32, device=self.device)
-        actions = self.act.get_noise_action(states)
-        return actions.detach().cpu().numpy()
+    def select_action(self, state):
+        states = torch.as_tensor((state,), dtype=torch.float32, device=self.device).detach_()
+        action = self.act.get_noise_action(states)[0]
+        return action.cpu().numpy()
 
     def update_net(self, buffer, target_step, batch_size, repeat_times):  # 1111
         """Contribution of InterSAC (Integrated network for SAC)
@@ -676,7 +670,7 @@ class AgentInterSAC(AgentSAC):  # Integrated Soft Actor-Critic
         3. Auto-TTUR updates parameter in non-integer times.
         4. Different learning rate is better than actor_term in parameter-sharing network training.
         """
-        buffer.update__now_len__before_sample()
+        buffer.update_now_len_before_sample()
 
         logprob = None  # just for print return
         alpha = self.alpha_log.exp().detach()  # auto temperature parameter
@@ -731,14 +725,19 @@ class AgentInterSAC(AgentSAC):  # Integrated Soft Actor-Critic
 class AgentPPO(AgentBase):
     def __init__(self):
         super().__init__()
-        self.clip = 0.3  # ratio.clamp(1 - clip, 1 + clip)
-        self.lambda_entropy = 0.01  # larger lambda_entropy means more exploration
+        self.ratio_clip = 0.3  # could be 0.2 ~ 0.5, ratio.clamp(1 - clip, 1 + clip),
+        self.lambda_entropy = 0.01  # could be 0.01 ~ 0.05
+        self.lambda_gae_adv = 0.98  # could be 0.95 ~ 0.99, GAE (Generalized Advantage Estimation. ICLR.2016.)
+        self.if_use_gae = False  # if use Generalized Advantage Estimation
+        self.if_on_policy = True  # AgentPPO is an on policy DRL algorithm
+
         self.noise = None
         self.optimizer = None
-        self.if_on_policy = True
+        self.compute_reward = None  # attribution
 
     def init(self, net_dim, state_dim, action_dim):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.compute_reward = self.compute_reward_gae if self.if_use_gae else self.compute_reward_adv
 
         self.act = ActorPPO(net_dim, state_dim, action_dim).to(self.device)
         self.cri = CriticAdv(state_dim, net_dim).to(self.device)
@@ -747,22 +746,20 @@ class AgentPPO(AgentBase):
         self.optimizer = torch.optim.Adam([{'params': self.act.parameters(), 'lr': self.learning_rate},
                                            {'params': self.cri.parameters(), 'lr': self.learning_rate}])
 
-    def select_actions(self, states):  # states = (state, ...)
-        states = torch.as_tensor(states, dtype=torch.float32, device=self.device)
-        a_noise, noise = self.act.get_action_noise(states)
-        return a_noise.detach().cpu().numpy(), noise.detach().cpu().numpy()
+    def select_action(self, state):
+        states = torch.as_tensor((state,), dtype=torch.float32, device=self.device).detach()
+        actions, noises = self.act.get_action_noise(states)
+        return actions[0].cpu().numpy(), noises[0].cpu().numpy()
 
     def store_transition(self, env, buffer, target_step, reward_scale, gamma):
-        buffer.empty_memories__before_explore()  # NOTICE! necessary for on-policy
+        buffer.empty_buffer_before_explore()  # NOTICE! necessary for on-policy
         # assert target_step == buffer.max_len - max_step
 
         actual_step = 0
         while actual_step < target_step:
             state = env.reset()
             for _ in range(env.max_step):
-                action, noise = self.select_actions((state,))
-                action = action[0]
-                noise = noise[0]
+                action, noise = self.select_action(state)
 
                 next_state, reward, done, _ = env.step(np.tanh(action))
                 actual_step += 1
@@ -774,9 +771,9 @@ class AgentPPO(AgentBase):
                 state = next_state
         return actual_step
 
-    def update_net(self, buffer, _max_step, batch_size, repeat_times=8):
-        buffer.update__now_len__before_sample()
-        max_memo = buffer.now_len
+    def update_net(self, buffer, _target_step, batch_size, repeat_times=8):
+        buffer.update_now_len_before_sample()
+        max_memo = buffer.now_len  # assert max_memo >= _target_step
 
         '''Trajectory using reverse reward'''
         with torch.no_grad():
@@ -786,7 +783,7 @@ class AgentPPO(AgentBase):
             buf_value = torch.cat([self.cri(buf_state[i:i + bs]) for i in range(0, buf_state.size(0), bs)], dim=0)
             buf_logprob = -(buf_noise.pow(2).__mul__(0.5) + self.act.a_std_log + self.act.sqrt_2pi_log).sum(1)
 
-            buf_r_sum, buf_advantage = self.compute_reward(buffer, max_memo, buf_reward, buf_mask, buf_value)
+            buf_r_sum, buf_advantage = self.compute_reward(max_memo, buf_reward, buf_mask, buf_value)
             del buf_reward, buf_mask, buf_noise
 
         '''PPO: Surrogate objective of Trust Region'''
@@ -803,7 +800,7 @@ class AgentPPO(AgentBase):
             new_logprob = self.act.compute_logprob(state, action)  # it is obj_actor
             ratio = (new_logprob - logprob).exp()
             obj_surrogate1 = advantage * ratio
-            obj_surrogate2 = advantage * ratio.clamp(1 - self.clip, 1 + self.clip)
+            obj_surrogate2 = advantage * ratio.clamp(1 - self.ratio_clip, 1 + self.ratio_clip)
             obj_surrogate = -torch.min(obj_surrogate1, obj_surrogate2).mean()
             obj_entropy = (new_logprob.exp() * new_logprob).mean()  # policy entropy
             obj_actor = obj_surrogate + obj_entropy * self.lambda_entropy
@@ -818,7 +815,7 @@ class AgentPPO(AgentBase):
 
         return self.act.a_std_log.mean().item(), obj_critic.item()
 
-    def compute_reward(self, buffer, max_memo, buf_reward, buf_mask, buf_value):
+    def compute_reward_adv(self, max_memo, buf_reward, buf_mask, buf_value):
         buf_r_sum = torch.empty(max_memo, dtype=torch.float32, device=self.device)  # reward sum
         pre_r_sum = 0  # reward sum of previous step
         for i in range(max_memo - 1, -1, -1):
@@ -828,15 +825,7 @@ class AgentPPO(AgentBase):
         buf_advantage = (buf_advantage - buf_advantage.mean()) / (buf_advantage.std() + 1e-5)
         return buf_r_sum, buf_advantage
 
-
-class AgentGaePPO(AgentPPO):
-    def __init__(self):
-        super().__init__()
-        self.clip = 0.25  # ratio.clamp(1 - clip, 1 + clip)
-        self.lambda_entropy = 0.01  # could be 0.02
-        self.lambda_gae_adv = 0.98  # could be 0.95~0.99, GAE (Generalized Advantage Estimation. ICLR.2016.)
-
-    def compute_reward(self, buffer, max_memo, buf_reward, buf_mask, buf_value):
+    def compute_reward_gae(self, max_memo, buf_reward, buf_mask, buf_value):
         buf_r_sum = torch.empty(max_memo, dtype=torch.float32, device=self.device)  # old policy value
         buf_advantage = torch.empty(max_memo, dtype=torch.float32, device=self.device)  # advantage value
 
@@ -851,6 +840,12 @@ class AgentGaePPO(AgentPPO):
 
         buf_advantage = (buf_advantage - buf_advantage.mean()) / (buf_advantage.std() + 1e-5)
         return buf_r_sum, buf_advantage
+
+
+class AgentGaePPO(AgentPPO):  # plan to merge AgentGaePPO and AgentPPO
+    def __init__(self):
+        super().__init__()
+        self.if_gae = True
 
 
 class AgentInterPPO(AgentPPO):
@@ -875,9 +870,9 @@ class AgentInterPPO(AgentPPO):
             {'params': self.act.dec_q2.parameters(), },
         ], lr=self.learning_rate)
 
-    def update_net(self, buffer, _max_step, batch_size, repeat_times=8):  # old version
-        buffer.update__now_len__before_sample()
-        max_memo = buffer.now_len
+    def update_net(self, buffer, _target_step, batch_size, repeat_times=8):  # old version
+        buffer.update_now_len_before_sample()
+        max_memo = buffer.now_len  # assert max_memo >= _target_step
 
         '''Trajectory using Generalized Advantage Estimation (GAE)'''
         with torch.no_grad():
