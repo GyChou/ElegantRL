@@ -157,8 +157,9 @@ def demo2_continuous_action_space_on_policy():
     args = Arguments(if_on_policy=True)  # hyper-parameters of on-policy is different from off-policy
 
     '''choose an DRL algorithm'''
-    from elegantrl.agent import AgentGaePPO  # AgentPPO
-    args.agent = AgentGaePPO()
+    from elegantrl.agent import AgentPPO
+    args.agent = AgentPPO()
+    args.agent.if_use_gae = True
 
     '''choose environment'''
     # env = gym.make('Pendulum-v0')
@@ -186,7 +187,7 @@ def demo3_custom_env_fin_rl():
     '''choose an DRL algorithm'''
     args = Arguments(if_on_policy=True)
     args.agent = AgentPPO()
-    args.agent.if_use_gae = False  # 
+    args.agent.if_use_gae = False  #
 
     from elegantrl.env import FinanceStockEnv  # a standard env for ElegantRL, not need PreprocessEnv()
     args.env = FinanceStockEnv(if_train=True, train_beg=0, train_len=1024)
@@ -413,7 +414,7 @@ def mp__update_params(args, pipe1_eva, pipe1_exp_list):
 
     '''init: Agent, ReplayBuffer'''
     agent.init(net_dim, state_dim, action_dim)
-    if_on_policy = agent.__class__.__name__ in {'AgentPPO', 'AgentGaePPO', 'AgentInterPPO'}
+    if_on_policy = getattr(agent, 'if_on_policy', False)
 
     '''send'''
     pipe1_eva.send(agent.act)  # send
@@ -521,7 +522,7 @@ def mp_explore_in_env(args, pipe2_exp, worker_id):
     agent.init(net_dim, state_dim, action_dim)
     agent.state = env.reset()
 
-    if_on_policy = agent.__class__.__name__ in {'AgentPPO', 'AgentGaePPO', 'AgentInterPPO'}
+    if_on_policy = getattr(agent, 'if_on_policy', False)
     buffer = ReplayBuffer(max_len=max_memo // rollout_num + max_step, if_on_policy=if_on_policy,
                           state_dim=state_dim, action_dim=1 if if_discrete else action_dim, if_gpu=False)
 

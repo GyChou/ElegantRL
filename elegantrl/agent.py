@@ -842,12 +842,6 @@ class AgentPPO(AgentBase):
         return buf_r_sum, buf_advantage
 
 
-class AgentGaePPO(AgentPPO):  # plan to merge AgentGaePPO and AgentPPO
-    def __init__(self):
-        super().__init__()
-        self.if_gae = True
-
-
 class AgentInterPPO(AgentPPO):
     def __init__(self):
         super().__init__()
@@ -1008,10 +1002,10 @@ class ReplayBuffer:
                 all_other[:, 2 + self.action_dim:],  # noise
                 torch.as_tensor(self.buf_state[:self.now_len], device=self.device))  # state
 
-    def update__now_len__before_sample(self):
+    def update_now_len_before_sample(self):
         self.now_len = self.max_len if self.if_full else self.next_idx
 
-    def empty_memories__before_explore(self):
+    def empty_buffer_before_explore(self):
         self.next_idx = 0
         self.now_len = 0
         self.if_full = False
@@ -1094,15 +1088,15 @@ class ReplayBufferMP:
                 torch.cat([item[3] for item in l__r_m_a_n_s], dim=0),
                 torch.cat([item[4] for item in l__r_m_a_n_s], dim=0))
 
-    def update__now_len__before_sample(self):
+    def update_now_len_before_sample(self):
         self.now_len = 0
         for buffer in self.buffers:
-            buffer.update__now_len__before_sample()
+            buffer.update_now_len_before_sample()
             self.now_len += buffer.now_len
 
-    def empty_memories__before_explore(self):
+    def empty_buffer_before_explore(self):
         for buffer in self.buffers:
-            buffer.empty_memories__before_explore()
+            buffer.empty_buffer_before_explore()
 
     def print_state_norm(self, neg_avg=None, div_std=None):  # non-essential
         # for buffer in self.l_buffer:
