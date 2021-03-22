@@ -118,8 +118,8 @@ def demo3_custom_env():  # continuous action env: FinanceStock-v1
     from elegantrl.tutorial.agent import AgentPPO
     args.agent = AgentPPO()
 
-    "TotalStep:  5e4, TargetReward: 1.25, UsedTime:   30s, FinanceStock-v2"
-    "TotalStep: 16e4, TargetReward: 1.50, UsedTime:  160s, FinanceStock-v2"
+    "TotalStep:  5e4, TargetReward: 1.3, UsedTime:   40s, FinanceStock-v2"
+    "TotalStep: 16e4, TargetReward: 1.5, UsedTime:  160s, FinanceStock-v2"
     from elegantrl.tutorial.env import FinanceStockEnv  # a standard env for ElegantRL, not need PreprocessEnv()
     args.env = FinanceStockEnv(if_train=True)  # train_len = 1024
     args.env_eval = FinanceStockEnv(if_train=False)  # eval_len = 1699 - train_len

@@ -16,26 +16,30 @@
 
 ElegantRL is featured with **lightweight, efficient and stable**, for researchers and practitioners.
   
-  + **Lightweight**: The core codes  <1,000 lines (check elegantrl/tutorial), using PyTorch, OpenAI Gym, and NumPy.
+  + **Lightweight**: The core codes  <1,000 lines (check elegantrl/tutorial), using PyTorch (train), OpenAI Gym (env), NumPy, Matplotlib (plot).
   
   + **Efficient**: performance is comparable with [Ray RLlib](https://github.com/ray-project/ray).
   
   + **Stable**: as stable as [Stable Baseline 3](https://github.com/DLR-RM/stable-baselines3).
 
 Model-free deep reinforcement learning (DRL) algorithms: 
-+ **DDPG, TD3, SAC, A2C, PPO(GAE)** for continuous actions
++ **DDPG, TD3, SAC, A2C, PPO, PPO(GAE)** for continuous actions
 + **DQN, DoubleDQN, D3QN** for discrete actions
 
 For algorithm details, please check out [OpenAI Spinning Up](https://spinningup.openai.com/en/latest/). 
 
 # Table of Contents
 
++ [News](#News)
 + [File Structure](#File-Structure)
 + [Training Pipeline](#Training-Pipeline)
 + [Experimental Results](#Experimental-Results)
 + [Requirements](#Requirements)
 + [Model-free DRL Algorithms](#Model-free-DRL-Algorithms)
 
+# News
+
++ [Towardsdatascience] [ElegantRL: A Lightweight and Stable Deep Reinforcement Learning Library](https://towardsdatascience.com/elegantrl-a-lightweight-and-stable-deep-reinforcement-learning-library-95cef5f3460b)
 # File Structure
 ![File_structure](https://github.com/Yonv1943/ElegantRL/blob/master/figs/File_structure.png)
 
@@ -55,7 +59,7 @@ For algorithm details, please check out [OpenAI Spinning Up](https://spinningup.
 + **elegantrl/env.py**    # gym env or custom env, including FinanceStockEnv.
    + A PreprocessEnv class for gym-environment modification.
    + A self-created stock trading environment as an example for user customization.
-+ **Example_BipedalWalker.ipynb**      # BipedalWalker-v2 in jupyter notebooks
++ **BipedalWalker_Example.ipynb**      # BipedalWalker-v2 in jupyter notebooks
 + **ElegantRL_Demo.ipynb**       # Demo 1~ 4 in jupyter notebooks. Tell you how to use tutorial version and advanced version.
 + **ElegantRL_SingleFilePPO.py**  # Use single file to train PPO, more simple than tutorial version
 
@@ -70,7 +74,7 @@ As a high-level overview, the relations among the files are as follows. Initiali
 + `evaluator = Evaluator()` : evaluates and stores the trained model.
 + `buffer = ReplayBuffer()` : stores the transitions.
 ### Then, the training process is controlled by a while-loop:
-+ `agent.store_transition(…)`: the agent explores the environment within target steps, generates transitions, and stores them into the ReplayBuffer.
++ `agent.explore_env(…)`: the agent explores the environment within target steps, generates transitions, and stores them into the ReplayBuffer.
 + `agent.update_net(…)`: the agent uses a batch from the ReplayBuffer to update the network parameters.
 + `evaluator.evaluate_save(…)`: evaluates the agent's performance and keeps the trained model with the highest score.
 
